@@ -711,3 +711,109 @@ func (s *SIPService) transferSIPParticipantRequest(ctx context.Context, req *liv
 		RingingTimeout: req.RingingTimeout,
 	}, nil
 }
+
+func (s *SIPService) HoldSIPParticipant(ctx context.Context, req *livekit.HoldSIPParticipantRequest) (*emptypb.Empty, error) {
+	log := logger.GetLogger().WithUnlikelyValues(
+		"room", req.RoomName,
+		"participant", req.ParticipantIdentity,
+	)
+	AppendLogFields(ctx,
+		"room", req.RoomName,
+		"participant", req.ParticipantIdentity,
+	)
+
+	if req.RoomName == "" {
+		return nil, psrpc.NewErrorf(psrpc.InvalidArgument, "Missing room name")
+	}
+	if req.ParticipantIdentity == "" {
+		return nil, psrpc.NewErrorf(psrpc.InvalidArgument, "Missing participant identity")
+	}
+	if err := EnsureSIPCallPermission(ctx); err != nil {
+		return nil, twirpAuthError(err)
+	}
+	if err := EnsureAdminPermission(ctx, livekit.RoomName(req.RoomName)); err != nil {
+		return nil, twirpAuthError(err)
+	}
+
+	resp, err := s.roomService.GetParticipant(ctx, &livekit.RoomParticipantIdentity{
+		Room:     req.RoomName,
+		Identity: req.ParticipantIdentity,
+	})
+	if err != nil {
+		return nil, err
+	}
+	callID, ok := resp.Attributes[livekit.AttrSIPCallID]
+	if !ok {
+		return nil, psrpc.NewErrorf(psrpc.InvalidArgument, "no SIP session associated with participant")
+	}
+
+	timeout := 30 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout = time.Until(deadline)
+	} else {
+		var cancel func()
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	_, err = s.psrpcClient.HoldSIPParticipant(ctx, callID, &rpc.InternalHoldSIPParticipantRequest{
+		SipCallId: callID,
+	}, psrpc.WithRequestTimeout(timeout))
+	if err != nil {
+		log.Errorw("cannot hold sip participant", err)
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
+}
+
+func (s *SIPService) UnholdSIPParticipant(ctx context.Context, req *livekit.UnholdSIPParticipantRequest) (*emptypb.Empty, error) {
+	log := logger.GetLogger().WithUnlikelyValues(
+		"room", req.RoomName,
+		"participant", req.ParticipantIdentity,
+	)
+	AppendLogFields(ctx,
+		"room", req.RoomName,
+		"participant", req.ParticipantIdentity,
+	)
+
+	if req.RoomName == "" {
+		return nil, psrpc.NewErrorf(psrpc.InvalidArgument, "Missing room name")
+	}
+	if req.ParticipantIdentity == "" {
+		return nil, psrpc.NewErrorf(psrpc.InvalidArgument, "Missing participant identity")
+	}
+	if err := EnsureSIPCallPermission(ctx); err != nil {
+		return nil, twirpAuthError(err)
+	}
+	if err := EnsureAdminPermission(ctx, livekit.RoomName(req.RoomName)); err != nil {
+		return nil, twirpAuthError(err)
+	}
+
+	resp, err := s.roomService.GetParticipant(ctx, &livekit.RoomParticipantIdentity{
+		Room:     req.RoomName,
+		Identity: req.ParticipantIdentity,
+	})
+	if err != nil {
+		return nil, err
+	}
+	callID, ok := resp.Attributes[livekit.AttrSIPCallID]
+	if !ok {
+		return nil, psrpc.NewErrorf(psrpc.InvalidArgument, "no SIP session associated with participant")
+	}
+
+	timeout := 30 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout = time.Until(deadline)
+	} else {
+		var cancel func()
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	_, err = s.psrpcClient.UnholdSIPParticipant(ctx, callID, &rpc.InternalUnholdSIPParticipantRequest{
+		SipCallId: callID,
+	}, psrpc.WithRequestTimeout(timeout))
+	if err != nil {
+		log.Errorw("cannot unhold sip participant", err)
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
+}
